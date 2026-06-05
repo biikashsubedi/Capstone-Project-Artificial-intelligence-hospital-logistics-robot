@@ -1,0 +1,3 @@
+timestamp,input_command_string,assigned_station_goal,detected_object_color,vision_confidence,final_execution_state
+2026-06-05T12:01:13.941713,"Fetch Red Box (Medicine A) Box, Deliver to Patient Bay 1 (Bed A)",Patient Bay 1 (Bed A),Red Box (Medicine A),1.0,Dispatched
+2026-06-05T12:01:16.213211,"Fetch Red Box (Medicine A) Box, Deliver to Patient Bay 1 (Bed A)",Patient Bay 1 (Bed A),Red Box (Medicine A),1.0,Dispatched
