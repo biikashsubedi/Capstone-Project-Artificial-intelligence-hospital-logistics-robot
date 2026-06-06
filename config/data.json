@@ -1,0 +1,79 @@
+{
+  "medicines": [
+    {
+      "label": "Blue Box — Medicine B",
+      "value": "blue"
+    },
+    {
+      "label": "Red Box — Medicine A",
+      "value": "red"
+    },
+    {
+      "label": "Green Box — Medicine C",
+      "value": "green"
+    },
+    {
+      "label": "Yellow Box — Medicine D",
+      "value": "yellow"
+    }
+  ],
+  "bays": [
+    {
+      "label": "Patient Bay 1 — Bed A",
+      "value": "bay1a"
+    },
+    {
+      "label": "Patient Bay 2 — Bed B",
+      "value": "bay2b"
+    },
+    {
+      "label": "Patient Bay 3 — Bed A",
+      "value": "bay3a"
+    },
+    {
+      "label": "Patient Bay 3 — Bed B",
+      "value": "bay3b"
+    },
+    {
+      "label": "Emergency Standby Hub",
+      "value": "emergency"
+    }
+  ],
+  "voice_keywords": {
+    "medicines": {
+      "red": [
+        "red"
+      ],
+      "blue": [
+        "blue"
+      ],
+      "green": [
+        "green"
+      ],
+      "yellow": [
+        "yellow"
+      ]
+    },
+    "bays": {
+      "bay1a": [
+        "bay 1",
+        "bed a",
+        "one"
+      ],
+      "bay2b": [
+        "bay 2",
+        "bed b",
+        "two"
+      ],
+      "bay3a": [
+        "bay 3",
+        "three"
+      ],
+      "emergency": [
+        "emergency",
+        "hub",
+        "standby"
+      ]
+    }
+  }
+}

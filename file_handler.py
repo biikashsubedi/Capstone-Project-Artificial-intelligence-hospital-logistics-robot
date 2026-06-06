@@ -21,7 +21,7 @@ def save_to_csv(command_string, destination, color, filename="report.csv"):
             command_string,
             destination,
             color,
-            1.0,  # Simulated vision confidence
+            1.0,
             "Dispatched"
         ])
     return filename

@@ -1,0 +1,56 @@
+{
+  "app": {
+    "title": "AIG-200 · Capstone Workstation Control",
+    "version": "v2.0",
+    "logo": "AIG-200",
+    "subtitle": "Capstone Workstation Control"
+  },
+  "connection": {
+    "section": "SYSTEM CONNECTION",
+    "robot_status": "Robot Status",
+    "status_offline": "OFFLINE",
+    "status_connected": "CONNECTED",
+    "btn_connect": "CONNECT TO ROBOT",
+    "btn_connected": "ROBOT CONNECTED",
+    "btn_disconnect": "DISCONNECT ROBOT",
+    "log_connecting": "Establishing connection to JetAuto Pro ROS network...",
+    "log_connected": "Connected to JetAuto Pro — handshake successful.\n",
+    "log_disconnected": "Robot disconnected. All controls hidden.\n"
+  },
+  "payload": {
+    "section": "PAYLOAD CONFIGURATION",
+    "color_label": "Target Medicine Color",
+    "dest_label": "Destination Bay"
+  },
+  "deploy": {
+    "btn_deploy": "INITIATE DEPLOYMENT",
+    "mission_idle": "Mission offline — configure and deploy",
+    "mission_active": "Mission active — robot in transit",
+    "mission_done": "Ready to initiate another command",
+    "log_initiating": "Deployment initiated...",
+    "log_executing": "Command executed successfully.",
+    "log_busy": "Robot busy — please wait until current mission completes.",
+    "log_no_connect": "Cannot deploy — robot not connected.",
+    "log_incomplete": "Select both a medicine and a destination bay."
+  },
+  "voice": {
+    "section": "VOICE COMMAND OVERRIDE",
+    "btn_activate": "ACTIVATE MICROPHONE",
+    "btn_stop": "STOP LISTENING",
+    "status_standby": "Status: Mic Standby",
+    "status_listening": "Status: Listening...",
+    "status_done": "Status: Transcription Complete",
+    "log_activated": "Microphone activated. Awaiting verbal command...",
+    "log_deactivated": "Microphone deactivated manually.\n",
+    "log_incomplete": "Incomplete command. Specify both a Color and a Destination.\n",
+    "log_mapped": "Voice command mapped. Executing deployment...",
+    "log_unavailable": "Voice engine not available (voice_engine module missing)."
+  },
+  "telemetry": {
+    "title": "Telemetry Stream",
+    "footer": "LAYER 4 · CLOUD TELEMETRY",
+    "badge_idle": "IDLE",
+    "badge_connected": "CONNECTED",
+    "log_startup": "System offline. Click 'Connect to Robot' to initialize.\n"
+  }
+}

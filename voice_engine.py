@@ -54,8 +54,8 @@ class VoiceController:
             self.on_transcription(text)
             self.stop(manual=False)
         except sr.UnknownValueError:
-            self.on_error("Could not understand audio. Try again.")
+            self.on_error("Could not understand audio. Try again.\n")
             self.stop(manual=False)
         except sr.RequestError:
-            self.on_error("Network error. Check internet connection.")
+            self.on_error("Network error. Check internet connection.\n")
             self.stop(manual=False)

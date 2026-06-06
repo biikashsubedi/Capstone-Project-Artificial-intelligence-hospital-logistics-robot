@@ -7,7 +7,7 @@
 
 > **An autonomous hardware-software prototype engineered to reduce nursing fatigue by automating the internal transport of clinical supplies.**
 
-*(💡 Note: Insert a high-quality GIF or photo of your robot driving or picking up a box here. HR managers need visual proof immediately!)*
+
 
 ## 📖 Executive Summary
 Currently, nursing staff spend up to 35% of their active shifts on internal logistics, contributing to workplace burnout. This capstone project introduces an autonomous mobile robot (AMR) capable of navigating a clinical environment, identifying specific medications via edge AI, executing mechanical retrieval, and logging real-time delivery states to a remote cloud dashboard.
