@@ -4,8 +4,6 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import ttk, messagebox
 
-from
-
 # ── Optional dependencies ──────────────────────────────────────────────────────
 try:
     from tkmacosx import Button as MacButton
