@@ -7,6 +7,7 @@
 
 > **An autonomous hardware-software prototype engineered to reduce nursing fatigue by automating the internal transport of clinical supplies.**
 
+<img width="979" height="729" alt="Screenshot 2026-06-05 at 10 50 01 PM" src="https://github.com/user-attachments/assets/fe59fd65-6417-4290-894c-0426d38e0f1b" />
 
 
 ## 📖 Executive Summary
