@@ -3,7 +3,8 @@ import os
 from datetime import datetime
 
 
-def save_to_csv(command_string, destination, color, filename="report.csv"):
+def save_to_csv(command_string, destination, color,
+                confidence=1.0, state="Dispatched", filename="report.csv"):
     """Writes the execution payload to a local CSV edge cache."""
     headers = [
         "timestamp", "input_command_string", "assigned_station_goal",
@@ -21,7 +22,7 @@ def save_to_csv(command_string, destination, color, filename="report.csv"):
             command_string,
             destination,
             color,
-            1.0,
-            "Dispatched"
+            confidence,
+            state
         ])
     return filename

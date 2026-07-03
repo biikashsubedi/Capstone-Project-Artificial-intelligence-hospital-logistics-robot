@@ -1,79 +1,42 @@
 {
   "medicines": [
     {
-      "label": "Blue Box — Medicine B",
-      "value": "blue"
+      "label": "Acetaminophen — Med 1",
+      "value": "med1"
     },
     {
-      "label": "Red Box — Medicine A",
-      "value": "red"
+      "label": "Allergy Relief — Med 2",
+      "value": "med2"
     },
     {
-      "label": "Green Box — Medicine C",
-      "value": "green"
-    },
-    {
-      "label": "Yellow Box — Medicine D",
-      "value": "yellow"
+      "label": "Ibuprofen — Med 3",
+      "value": "med3"
     }
   ],
   "bays": [
     {
-      "label": "Patient Bay 1 — Bed A",
-      "value": "bay1a"
+      "label": "Bed 1",
+      "value": "bed1"
     },
     {
-      "label": "Patient Bay 2 — Bed B",
-      "value": "bay2b"
+      "label": "Bed 2",
+      "value": "bed2"
     },
     {
-      "label": "Patient Bay 3 — Bed A",
-      "value": "bay3a"
-    },
-    {
-      "label": "Patient Bay 3 — Bed B",
-      "value": "bay3b"
-    },
-    {
-      "label": "Emergency Standby Hub",
-      "value": "emergency"
+      "label": "Bed 3",
+      "value": "bed3"
     }
   ],
   "voice_keywords": {
     "medicines": {
-      "red": [
-        "red"
-      ],
-      "blue": [
-        "blue"
-      ],
-      "green": [
-        "green"
-      ],
-      "yellow": [
-        "yellow"
-      ]
+      "med1": ["acetaminophen", "tylenol", "med one", "med 1"],
+      "med2": ["allergy", "allergy relief", "med two", "med 2"],
+      "med3": ["ibuprofen", "advil", "med three", "med 3"]
     },
     "bays": {
-      "bay1a": [
-        "bay 1",
-        "bed a",
-        "one"
-      ],
-      "bay2b": [
-        "bay 2",
-        "bed b",
-        "two"
-      ],
-      "bay3a": [
-        "bay 3",
-        "three"
-      ],
-      "emergency": [
-        "emergency",
-        "hub",
-        "standby"
-      ]
+      "bed1": ["bed one", "bed 1"],
+      "bed2": ["bed two", "bed 2"],
+      "bed3": ["bed three", "bed 3"]
     }
   }
 }

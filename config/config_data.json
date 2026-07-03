@@ -5,6 +5,26 @@
     "logo": "AIG-200",
     "subtitle": "Capstone Workstation Control"
   },
+  "robot": {
+    "host": "192.168.149.1",
+    "port": 5050,
+    "timeout": 180,
+    "video_port": 8080,
+    "cameras": [
+      {"name": "Main Camera", "topic": "/astra_cam/rgb/image_raw"},
+      {"name": "Arm Camera", "topic": "/usb_cam/image_raw"}
+    ],
+    "detect_camera": 1
+  },
+  "model": {
+    "path": "best.pt",
+    "confidence": 0.6,
+    "class_map": {
+      "med1": "acetaminophen",
+      "med2": "allergy_relief",
+      "med3": "ibuprofen"
+    }
+  },
   "connection": {
     "section": "SYSTEM CONNECTION",
     "robot_status": "Robot Status",
@@ -19,8 +39,8 @@
   },
   "payload": {
     "section": "PAYLOAD CONFIGURATION",
-    "color_label": "Target Medicine Color",
-    "dest_label": "Destination Bay"
+    "color_label": "Target Medicine",
+    "dest_label": "Destination Bed"
   },
   "deploy": {
     "btn_deploy": "INITIATE DEPLOYMENT",

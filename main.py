@@ -1,8 +1,15 @@
 import json
+import os
+import re
+import subprocess
+import sys
+import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import ttk, messagebox
+
+from robot_link import RobotLink
 
 # ── Optional dependencies ──────────────────────────────────────────────────────
 try:
@@ -25,6 +32,37 @@ try:
     HAS_VOICE = True
 except ImportError:
     HAS_VOICE = False
+
+try:
+    from camera_view import CameraStream, PIL_AVAILABLE
+
+    HAS_CAMERA = True
+except ImportError:
+    HAS_CAMERA = False
+    PIL_AVAILABLE = False
+
+try:
+    from medicine_detector import MedicineDetector
+
+    HAS_DETECTOR = True
+except ImportError:
+    HAS_DETECTOR = False
+
+
+def notify_mac(title, message, sound="Glass"):
+    """Show a native macOS notification banner (no extra packages needed).
+    Pass sound=None for a silent banner."""
+    if sys.platform != "darwin":
+        return
+    script = 'display notification "{}" with title "{}"'.format(
+        message.replace('"', "'"), title.replace('"', "'"))
+    if sound:
+        script += ' sound name "{}"'.format(sound)
+    try:
+        subprocess.Popen(["osascript", "-e", script],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
 # ── Config loading ─────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -68,8 +106,6 @@ FONT_HEADER = ("Helvetica", 11, "bold")
 FONT_BODY = ("Helvetica", 11)
 FONT_SMALL = ("Helvetica", 9)
 FONT_MONO = ("Courier", 11)
-
-MISSION_DELAY_MS = 5000  # simulated robot work time in milliseconds
 
 # Loading animation frames shown on the deploy button while robot is busy
 LOADING_FRAMES = [
@@ -132,7 +168,7 @@ class CapstoneWorkstationUI:
             return
 
         self.root.title(self._lbl["app"]["title"])
-        self.root.geometry("980x700")
+        self.root.geometry("1200x800")
         self.root.configure(bg=C["bg"])
         self.root.resizable(True, True)
 
@@ -140,6 +176,22 @@ class CapstoneWorkstationUI:
         self._is_busy = False
         self._loading_job = None  # after() id for the loading animation
         self._loading_frame = 0  # current animation frame index
+        self.robot = None  # RobotLink socket once connected
+
+        # Live camera feeds
+        self.CAM_W = 480   # fallback size until the tile is laid out
+        self.CAM_H = 360
+        self._cam_cfgs = []
+        self._cam_labels = []
+        self._cam_holders = []
+        self._cam_streams = []
+
+        # Live medicine detection (best.pt via ultralytics)
+        self.detector = MedicineDetector() if HAS_DETECTOR else None
+        self._detect_on = False
+        self._detect_results = []     # latest [(name, conf, box), ...]
+        self._detect_generation = 0   # bumps every toggle; stops stale loops
+        self._notify_last = {}        # per-event notification cooldown clocks
 
         self.voice = None
         self._voice_active = False
@@ -359,9 +411,15 @@ class CapstoneWorkstationUI:
 
         inner = tk.Frame(rp, bg=C["right"])
         inner.pack(fill=tk.BOTH, expand=True, padx=18, pady=18)
+        inner.grid_columnconfigure(0, weight=1)
+        inner.grid_rowconfigure(0, weight=3)   # cameras ~60% of height
+        inner.grid_rowconfigure(2, weight=2)   # telemetry stream ~40% of height
+
+        cam_sec = self._build_cameras(inner)
+        cam_sec.grid(row=0, column=0, sticky="nsew", pady=(0, 12))
 
         hdr = tk.Frame(inner, bg=C["right"])
-        hdr.pack(fill=tk.X, pady=(0, 12))
+        hdr.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         tk.Label(hdr, text=self._lbl["telemetry"]["title"],
                  bg=C["right"], font=("Helvetica", 13, "bold"),
                  fg=C["text"]).pack(side=tk.LEFT)
@@ -381,9 +439,9 @@ class CapstoneWorkstationUI:
             font=FONT_MONO, wrap=tk.WORD, relief="flat", bd=0,
             insertbackground=C["term_grn"],
             selectbackground="#21262d",
-            state=tk.DISABLED,
+            state=tk.DISABLED, height=6,
         )
-        self._terminal.pack(fill=tk.BOTH, expand=True)
+        self._terminal.grid(row=2, column=0, sticky="nsew")
 
         self._terminal.tag_config("ts", foreground="#6e7681")
         self._terminal.tag_config("default", foreground=C["term_fg"])
@@ -392,7 +450,7 @@ class CapstoneWorkstationUI:
         self._terminal.tag_config("warn", foreground=C["term_ylw"])
 
         footer = tk.Frame(inner, bg=C["right"])
-        footer.pack(fill=tk.X, pady=(10, 0))
+        footer.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         tk.Label(footer, text=self._lbl["telemetry"]["footer"],
                  bg=C["right"], font=("Courier", 9),
                  fg=C["muted"]).pack(side=tk.LEFT)
@@ -403,6 +461,207 @@ class CapstoneWorkstationUI:
 
         self._event_count = 0
         self.safe_log(self._lbl["telemetry"]["log_startup"])
+
+    # ── Live camera feeds ────────────────────────────────────────────────────────
+    def _build_cameras(self, parent):
+        sec = tk.Frame(parent, bg=C["right"])
+        cam_hdr = tk.Frame(sec, bg=C["right"])
+        cam_hdr.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(cam_hdr, text="Live Camera Feeds", bg=C["right"],
+                 font=("Helvetica", 13, "bold"), fg=C["text"]).pack(side=tk.LEFT)
+        self._detect_btn = make_btn(
+            cam_hdr, text="DETECTION: OFF", command=self._toggle_detection,
+            bg=C["muted"], hover=C["purple_hov"],
+            font=("Courier", 10, "bold"), padx=8, pady=3)
+        self._detect_btn.pack(side=tk.RIGHT)
+        self._detect_lbl = tk.Label(cam_hdr, text="", bg=C["right"],
+                                    font=("Courier", 10), fg=C["text2"])
+        self._detect_lbl.pack(side=tk.RIGHT, padx=(0, 10))
+
+        row = tk.Frame(sec, bg=C["right"])
+        row.pack(fill=tk.BOTH, expand=True)
+
+        self._cam_cfgs = self._lbl.get("robot", {}).get("cameras", [])
+        self._cam_labels = []
+        self._cam_holders = []
+        for i, cam in enumerate(self._cam_cfgs):
+            tile = tk.Frame(row, bg=C["term_bg"],
+                            highlightbackground=C["border"], highlightthickness=1)
+            tile.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
+                      padx=(0 if i == 0 else 10, 0))
+            tk.Label(tile, text=cam.get("name", "Camera"),
+                     bg=C["term_bg"], fg=C["term_blu"],
+                     font=("Courier", 9, "bold")).pack(anchor=tk.W, padx=6, pady=(4, 2))
+            # Holder keeps its layout-given size (pack_propagate False) so the
+            # video frame inside can't make the tile grow.
+            holder = tk.Frame(tile, bg="#000000", width=self.CAM_W, height=self.CAM_H)
+            holder.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
+            holder.pack_propagate(False)
+            lbl = tk.Label(holder, text="● offline", bg="#000000",
+                           fg=C["muted"], font=FONT_SMALL, compound=tk.CENTER)
+            lbl.pack(fill=tk.BOTH, expand=True)
+            self._cam_labels.append(lbl)
+            self._cam_holders.append(holder)
+
+        if self._cam_cfgs and not PIL_AVAILABLE:
+            for lbl in self._cam_labels:
+                lbl.config(text="● Pillow not installed\n(pip3 install Pillow)")
+
+        return sec
+
+    def _start_cameras(self):
+        if not HAS_CAMERA or not self._cam_labels:
+            return
+        rc = self._lbl.get("robot", {})
+        host = os.environ.get("ROBOT_HOST", rc.get("host", "192.168.149.1"))
+        vport = int(rc.get("video_port", 8080))
+        self._cam_streams = []
+        for cfg, lbl, holder in zip(self._cam_cfgs, self._cam_labels, self._cam_holders):
+            url = "http://{}:{}/stream?topic={}".format(host, vport, cfg["topic"])
+            stream = CameraStream(
+                url, lbl, container=holder, default_size=(self.CAM_W, self.CAM_H),
+                on_status=lambda text, l=lbl: l.config(image="", text="● " + text))
+            self._cam_streams.append(stream)
+            stream.start()
+
+    def _stop_cameras(self):
+        for stream in self._cam_streams:
+            stream.stop()
+        self._cam_streams = []
+        for lbl in self._cam_labels:
+            lbl.config(image="", text="● offline")
+            lbl.image = None
+
+    # ── Live medicine detection (best.pt) ────────────────────────────────────
+    def _detect_stream(self):
+        """CameraStream used for detection (config robot.detect_camera index)."""
+        if not self._cam_streams:
+            return None
+        idx = int(self._lbl.get("robot", {}).get("detect_camera", 1))
+        idx = min(max(idx, 0), len(self._cam_streams) - 1)
+        return self._cam_streams[idx]
+
+    def _toggle_detection(self):
+        if self.detector is None:
+            self.safe_log("⚠ Detector unavailable — install ultralytics "
+                          "(pip install ultralytics) and ensure best.pt exists.", "warn")
+            return
+        if not self._detect_on:
+            if not self._is_connected or not self._cam_streams:
+                self.safe_log("⚠ Connect to the robot first — detection runs on the "
+                              "live camera feed.", "warn")
+                return
+            self._detect_on = True
+            self._detect_generation += 1
+            self._detect_btn.config(bg=C["purple"], text="DETECTION: ON")
+            self.safe_log("Vision model loading (first run takes a few seconds)...",
+                          "info")
+            stream = self._detect_stream()
+            if stream is not None:
+                stream.frame_filter = self._draw_detections
+            threading.Thread(target=self._detection_loop,
+                             args=(self._detect_generation,), daemon=True).start()
+        else:
+            self._detect_on = False
+            self._detect_generation += 1
+            self._detect_results = []
+            self._detect_btn.config(bg=C["muted"], text="DETECTION: OFF")
+            self._detect_lbl.config(text="")
+            stream = self._detect_stream()
+            if stream is not None:
+                stream.frame_filter = None
+            self.safe_log("Live detection stopped.", "info")
+
+    def _detection_loop(self, generation):
+        """Background loop: run the model on the newest camera frame."""
+        if not self.detector.ensure_loaded():
+            self.safe_log("⚠ Model failed to load: {}".format(
+                self.detector.load_error), "warn")
+            self.root.after(0, self._toggle_detection)
+            return
+        last_seen = ""
+        import time as _time
+        while self._detect_on and generation == self._detect_generation:
+            stream = self._detect_stream()
+            frame = stream.get_latest_image() if stream else None
+            if frame is None:
+                _time.sleep(0.3)
+                continue
+            try:
+                dets = self.detector.detect(frame)
+            except Exception as e:
+                self.safe_log("⚠ Detection error: {}".format(e), "warn")
+                break
+            self._detect_results = dets
+            summary = "  ".join("{} {:.0f}%".format(
+                self.detector.label_for(n), c * 100) for n, c, _ in dets[:3])
+            self.root.after(0, lambda s=summary: self._detect_lbl.config(
+                text=s or "no medicine in view"))
+            if summary != last_seen and dets:
+                self.safe_log("Vision: {}".format(summary), "info")
+                last_seen = summary
+            # Notify when a medicine (re)appears — max once per class per 30 s
+            now = _time.time()
+            for name, conf, _box in dets:
+                if now - self._notify_last.get(name, 0) > 30:
+                    self._notify_last[name] = now
+                    notify_mac("Medicine Spotted 💊",
+                               "{} in view ({:.0f}%)".format(
+                                   self.detector.label_for(name), conf * 100),
+                               sound=None)
+            _time.sleep(0.25)
+
+    def _draw_detections(self, img):
+        """Frame filter: draw the latest detection boxes onto a camera frame."""
+        dets = self._detect_results
+        if not dets:
+            return img
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        for name, conf, (x1, y1, x2, y2) in dets:
+            draw.rectangle([x1, y1, x2, y2], outline="#3fb950", width=4)
+            tag = " {} {:.0f}% ".format(self.detector.label_for(name), conf * 100)
+            ty = y1 - 16 if y1 > 18 else y1 + 4
+            draw.rectangle([x1, ty, x1 + 8 * len(tag), ty + 15], fill="#3fb950")
+            draw.text((x1 + 3, ty + 2), tag.strip(), fill="black")
+        return img
+
+    def _answer_detect(self, med):
+        """Robot asked 'is <med> on the shelf?' — run the model on the newest
+        arm-camera frame. Returns (found, confidence). Called off the UI thread."""
+        if self.detector is None:
+            return (False, 0.0)
+        stream = self._detect_stream()
+        frame = stream.get_latest_image() if stream else None
+        if frame is None:
+            self.safe_log("⚠ Vision check requested but no camera frame available",
+                          "warn")
+            return (False, 0.0)
+        conf = self.detector.check_medicine(med, frame)
+        if conf is not None:
+            self.safe_log("✓ Vision confirmed {} ({:.0f}%)".format(med, conf * 100),
+                          "success")
+            notify_mac("Vision Confirmed 👁",
+                       "{} identified on shelf ({:.0f}%)".format(med, conf * 100),
+                       sound="Pop")
+            return (True, conf)
+        self.safe_log("Vision: {} not visible in current frame".format(med), "warn")
+        return (False, 0.0)
+
+    def on_close(self):
+        """Tidy up background threads and the socket before the window closes."""
+        self._detect_on = False
+        self._detect_generation += 1
+        try:
+            self._stop_cameras()
+        except Exception:
+            pass
+        if self.robot is not None:
+            try:
+                self.robot.close()
+            except Exception:
+                pass
+        self.root.destroy()
 
     # ── Helpers ────────────────────────────────────────────────────────────────
     def _section_label(self, parent, text, bg=None):
@@ -485,37 +744,79 @@ class CapstoneWorkstationUI:
 
     def _do_connect(self):
         self.safe_log(self._lbl["connection"]["log_connecting"], "info")
-        self._connect_btn.config(state=tk.DISABLED,
-                                 text="Connecting...")
+        self._connect_btn.config(state=tk.DISABLED, text="Connecting...")
 
-        def _finish():
-            self._is_connected = True
-            self.safe_log(
-                "✓ " + self._lbl["connection"]["log_connected"], "success")
-            self._status_dot.config(fg="#10ac84")
-            self._status_txt.config(
-                text=self._lbl["connection"]["status_connected"],
-                fg="#10ac84")
-            # Switch button to Disconnect (red)
-            self._connect_btn.config(
-                text=self._lbl["connection"]["btn_disconnect"],
-                bg=C["red"],
-                state=tk.NORMAL)
-            if USE_MAC_BTN:
-                self._connect_btn.bind(
-                    "<Enter>", lambda e: self._connect_btn.config(bg=C["red_hover"]))
-                self._connect_btn.bind(
-                    "<Leave>", lambda e: self._connect_btn.config(bg=C["red"]))
-            else:
-                self._connect_btn.config(activebackground=C["red_hover"])
-            self._show_connected_controls()
+        rc = self._lbl.get("robot", {})
+        # ROBOT_HOST / ROBOT_PORT env vars override config (handy for demos/testing).
+        host = os.environ.get("ROBOT_HOST", rc.get("host", "192.168.149.1"))
+        port = int(os.environ.get("ROBOT_PORT", rc.get("port", 5050)))
+        timeout = int(rc.get("timeout", 180))
+        self.robot = RobotLink(host, port, timeout)
 
-        self.root.after(700, _finish)
+        def work():
+            self.robot.connect()
+            return True
+
+        def on_done(_result, err):
+            if err is not None:
+                self.robot = None
+                self.safe_log("⚠ Connection failed: {}".format(err), "warn")
+                notify_mac("Robot Connection Failed ✗",
+                           "Could not reach {}:{} — {}".format(host, port, err),
+                           sound="Basso")
+                messagebox.showerror(
+                    "Connection Error",
+                    "Could not connect to robot at {}:{}\n\n{}".format(host, port, err))
+                self._connect_btn.config(
+                    state=tk.NORMAL,
+                    text=self._lbl["connection"]["btn_connect"])
+                return
+            notify_mac("Robot Connected ✓",
+                       "JetAuto Pro online at {} — handshake successful".format(host))
+            self._finish_connect()
+
+        self._run_async(work, on_done)
+
+    def _finish_connect(self):
+        self._is_connected = True
+        self.safe_log("✓ " + self._lbl["connection"]["log_connected"], "success")
+        self._status_dot.config(fg="#10ac84")
+        self._status_txt.config(
+            text=self._lbl["connection"]["status_connected"], fg="#10ac84")
+        # Switch button to Disconnect (red)
+        self._connect_btn.config(
+            text=self._lbl["connection"]["btn_disconnect"],
+            bg=C["red"], state=tk.NORMAL)
+        if USE_MAC_BTN:
+            self._connect_btn.bind(
+                "<Enter>", lambda e: self._connect_btn.config(bg=C["red_hover"]))
+            self._connect_btn.bind(
+                "<Leave>", lambda e: self._connect_btn.config(bg=C["red"]))
+        else:
+            self._connect_btn.config(activebackground=C["red_hover"])
+        self._show_connected_controls()
+        self._start_cameras()
+
+    def _run_async(self, work, on_done):
+        """Run blocking work() in a thread; deliver (result, err) to on_done on the UI thread."""
+        def runner():
+            try:
+                result, err = work(), None
+            except Exception as e:  # noqa: BLE001 — surface any socket/robot error to the UI
+                result, err = None, e
+            self.root.after(0, lambda: on_done(result, err))
+        threading.Thread(target=runner, daemon=True).start()
 
     def _do_disconnect(self):
         if self._is_busy:
             self.safe_log("⚠ " + self._lbl["deploy"]["log_busy"], "warn")
             return
+        if self.robot is not None:
+            self.robot.close()
+            self.robot = None
+        if self._detect_on:
+            self._toggle_detection()
+        self._stop_cameras()
         self._is_connected = False
         self._hide_connected_controls()
         self._status_dot.config(fg=C["muted"])
@@ -535,50 +836,112 @@ class CapstoneWorkstationUI:
         else:
             self._connect_btn.config(activebackground=C["brand_hover"])
         self.safe_log(self._lbl["connection"]["log_disconnected"], "warn")
+        notify_mac("Robot Disconnected", "Connection closed — controls hidden",
+                   sound=None)
 
     # ── Deployment ─────────────────────────────────────────────────────────────
     def _execute_command(self):
-        if not self._is_connected:
+        if not self._is_connected or self.robot is None:
             self.safe_log("⚠ " + self._lbl["deploy"]["log_no_connect"], "warn")
             return
         if self._is_busy:
             self.safe_log("⚠ " + self._lbl["deploy"]["log_busy"], "warn")
             return
 
-        color = self._color_var.get().strip()
-        dest = self._dest_var.get().strip()
-        if not color or not dest:
+        med = self._med_value()
+        bed = self._bed_value()
+        if not med or not bed:
             self.safe_log("⚠ " + self._lbl["deploy"]["log_incomplete"], "warn")
             return
+
+        command = "move {} to {}".format(med, bed)
+        med_label = self._color_var.get()
+        bed_label = self._dest_var.get()
 
         self._set_busy(True)
         self._mission_lbl.config(
             text=self._lbl["deploy"]["mission_active"], fg="#10ac84")
+        self.safe_log("{} → {}".format(
+            self._lbl["deploy"]["log_initiating"], command), "warn")
+        self.safe_log("Robot working autonomously — this may take a minute...", "info")
+        notify_mac("Delivery Started 🚚",
+                   "{} → {}".format(med_label, bed_label), sound=None)
 
-        self.safe_log(self._lbl["deploy"]["log_initiating"], "warn")
-        self.root.after(400, lambda: self.safe_log(
-            "Payload: {}".format(color), "info"))
-        self.root.after(800, lambda: self.safe_log(
-            "Destination: {}".format(dest), "info"))
-        self.root.after(1400, lambda: self.safe_log(
-            "Robot departing bay. Navigation mode: autonomous.", "info"))
+        def on_log(msg):
+            self.safe_log("🤖 " + msg, "info")
+            if msg.startswith("Step "):   # mirror current step under the button
+                self.root.after(0, lambda m=msg: self._mission_lbl.config(
+                    text=m[:46], fg="#10ac84"))
 
-        self.root.after(MISSION_DELAY_MS, self._mission_complete, color, dest)
+        def work():
+            return self.robot.send_command(
+                command, on_log=on_log, on_detect=self._answer_detect)
 
-    def _mission_complete(self, color, dest):
+        def on_done(response, err):
+            self._handle_delivery_result(command, med_label, bed_label, response, err)
+
+        self._run_async(work, on_done)
+
+    def _handle_delivery_result(self, command, med_label, bed_label, response, err):
         self._set_busy(False)
-        self.safe_log("✓ " + self._lbl["deploy"]["log_executing"], "success")
-        self._mission_lbl.config(
-            text=self._lbl["deploy"]["mission_done"], fg=C["muted"])
 
-        if HAS_FILE_HANDLER:
-            try:
-                saved = file_handler.save_to_csv(
-                    "Fetch {} to {}".format(color, dest), dest, color)
-                self.safe_log("✓ Telemetry cached: {}\n".format(saved), "success")
-            except Exception as e:
-                messagebox.showerror("System Error",
-                                     "Failed to cache telemetry:\n{}".format(e))
+        if err is not None:
+            self.safe_log("⚠ Delivery error: {}".format(err), "warn")
+            self._mission_lbl.config(
+                text=self._lbl["deploy"]["mission_idle"], fg=C["muted"])
+            self._log_telemetry(command, bed_label, med_label, 0.0, "Failed")
+            notify_mac("Delivery Failed", str(err), sound="Basso")
+            return
+
+        response = (response or "").strip()
+        if response.startswith("OK"):
+            self.safe_log("✓ " + response, "success")
+            self._mission_lbl.config(
+                text=self._lbl["deploy"]["mission_done"], fg=C["muted"])
+            self._log_telemetry(command, bed_label, med_label,
+                                self._parse_confidence(response), "Completed")
+            notify_mac("Delivery Complete ✓",
+                       "{} delivered to {}".format(med_label, bed_label))
+        else:
+            self.safe_log("⚠ " + (response or "No response from robot"), "warn")
+            self._mission_lbl.config(
+                text=self._lbl["deploy"]["mission_idle"], fg=C["muted"])
+            self._log_telemetry(command, bed_label, med_label, 0.0, "Failed")
+            notify_mac("Delivery Failed", response or "No response from robot",
+                       sound="Basso")
+
+    def _log_telemetry(self, command, destination, color, confidence, state):
+        if not HAS_FILE_HANDLER:
+            return
+        try:
+            saved = file_handler.save_to_csv(
+                command, destination, color, confidence=confidence, state=state)
+            self.safe_log("✓ Telemetry cached: {} [{}]\n".format(saved, state), "success")
+        except Exception as e:
+            messagebox.showerror("System Error",
+                                 "Failed to cache telemetry:\n{}".format(e))
+
+    @staticmethod
+    def _parse_confidence(text):
+        """Pull the 'vision NN%' value out of the robot's OK reply, else default 1.0."""
+        m = re.search(r"vision\s+(\d+)\s*%", text)
+        return int(m.group(1)) / 100.0 if m else 1.0
+
+    def _med_value(self):
+        """Map the selected medicine label back to its command token (med1/2/3)."""
+        label = self._color_var.get()
+        for m in self._payload["medicines"]:
+            if m["label"] == label:
+                return m["value"]
+        return None
+
+    def _bed_value(self):
+        """Map the selected destination label back to its command token (bed1/2/3)."""
+        label = self._dest_var.get()
+        for b in self._payload["bays"]:
+            if b["label"] == label:
+                return b["value"]
+        return None
 
     # ── Voice ──────────────────────────────────────────────────────────────────
     def _toggle_mic(self):
@@ -650,4 +1013,8 @@ class CapstoneWorkstationUI:
 if __name__ == "__main__":
     root = tk.Tk()
     app = CapstoneWorkstationUI(root)
+    try:
+        root.protocol("WM_DELETE_WINDOW", app.on_close)
+    except tk.TclError:
+        pass  # window already destroyed (e.g. missing config)
     root.mainloop()
