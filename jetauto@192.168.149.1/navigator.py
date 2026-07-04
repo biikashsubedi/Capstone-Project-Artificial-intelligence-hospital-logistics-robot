@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Autonomous navigation. go_to(location_name) drives the robot to a saved
 location from locations.json using move_base (the same system you use by

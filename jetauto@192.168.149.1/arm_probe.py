@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Diagnostic: prints everything about this robot's arm/servo interfaces.
 Run it once on the robot and paste the output back if the arm doesn't move —

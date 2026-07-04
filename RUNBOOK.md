@@ -37,8 +37,11 @@ GUI logs telemetry CSV + macOS notification.
 ```bash
 # Mac, on ROBOT WiFi (HW-2DC16182):
 cd ~/Desktop/robotProject
-scp -r robot/ jetauto@192.168.149.1:~/delivery/
+ssh jetauto@192.168.149.1 "mkdir -p ~/delivery"
+scp robot/*.py robot/*.json robot/*.md jetauto@192.168.149.1:~/delivery/
 ```
+Note: always run scripts on the robot with **python3** (plain `python` there
+is Python 2 and will fail with encoding/syntax errors).
 
 ---
 

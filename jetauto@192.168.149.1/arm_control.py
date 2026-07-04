@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Arm pick-and-drop using fixed, pre-recorded servo positions.
 

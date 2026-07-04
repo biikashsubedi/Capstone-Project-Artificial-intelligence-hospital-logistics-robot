@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Medicine detection using your custom-trained Roboflow model (local inference).
 

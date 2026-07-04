@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Central configuration for the AI Nurse Robot delivery system (robot side).
 

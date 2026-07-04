@@ -13,13 +13,6 @@ from robot_link import RobotLink
 
 # ── Optional dependencies ──────────────────────────────────────────────────────
 try:
-    from tkmacosx import Button as MacButton
-
-    USE_MAC_BTN = True
-except ImportError:
-    USE_MAC_BTN = False
-
-try:
     import file_handler
 
     HAS_FILE_HANDLER = True
@@ -124,26 +117,83 @@ LOADING_INTERVAL_MS = 180  # ms between each animation frame
 
 
 # ── Button factory ─────────────────────────────────────────────────────────────
+def _mix(hex1, hex2, t):
+    """Blend two #rrggbb colours; t=0 -> hex1, t=1 -> hex2."""
+    a = [int(hex1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(hex2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(int(x + (y - x) * t) for x, y in zip(a, b))
+
+
+class FlatButton(tk.Label):
+    """Flat colored button drawn with a Label.
+
+    Native tk.Button on macOS ignores bg/fg entirely (white text on a white
+    button — invisible). Labels render colors faithfully on every platform,
+    so we build the button behaviour on top of one: hover shade, click
+    command, and a dimmed disabled state.
+    """
+
+    def __init__(self, parent, text, command, bg, fg="white", hover=None,
+                 font=None, padx=10, pady=8):
+        tk.Label.__init__(self, parent, text=text, bg=bg, fg=fg,
+                          font=font or FONT_HEADER, padx=padx, pady=pady,
+                          cursor="hand2")
+        self._command = command
+        self._bg = bg
+        self._fg = fg
+        self._hover_bg = hover or _mix(bg, "#000000", 0.15)
+        self._disabled = False
+        self.bind("<Button-1>", self._click)
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+
+    def _click(self, _event):
+        if not self._disabled and callable(self._command):
+            self._command()
+
+    def _enter(self, _event):
+        if not self._disabled:
+            tk.Label.configure(self, bg=self._hover_bg)
+
+    def _leave(self, _event):
+        if not self._disabled:
+            tk.Label.configure(self, bg=self._bg)
+
+    def configure(self, cnf=None, **kw):
+        if cnf:
+            kw.update(cnf)
+        if "hover" in kw:
+            self._hover_bg = kw.pop("hover")
+        if "activebackground" in kw:          # old tk.Button API compatibility
+            self._hover_bg = kw.pop("activebackground")
+        kw.pop("activeforeground", None)
+        if "command" in kw:
+            self._command = kw.pop("command")
+        if "bg" in kw:
+            self._bg = kw["bg"]
+            self._hover_bg = kw.pop("hover", self._hover_bg)
+        if "fg" in kw:
+            self._fg = kw["fg"]
+        state = kw.pop("state", None)
+        if state is not None:
+            self._disabled = str(state) == "disabled"
+            if self._disabled:
+                kw.setdefault("cursor", "arrow")
+                kw["bg"] = _mix(self._bg, "#ffffff", 0.45)   # washed-out shade
+                kw["fg"] = self._fg
+            else:
+                kw.setdefault("cursor", "hand2")
+                kw["bg"] = self._bg
+                kw["fg"] = self._fg
+        return tk.Label.configure(self, **kw)
+
+    config = configure
+
+
 def make_btn(parent, text, command, bg, fg="white", hover=None, font=None,
              padx=10, pady=8):
-    font = font or FONT_HEADER
-    hover_bg = hover or bg
-    if USE_MAC_BTN:
-        b = MacButton(
-            parent, text=text, command=command,
-            bg=bg, fg=fg, font=font,
-            padx=padx, pady=pady, borderless=1, cursor="hand2",
-        )
-        b.bind("<Enter>", lambda e: b.config(bg=hover_bg))
-        b.bind("<Leave>", lambda e: b.config(bg=bg))
-    else:
-        b = tk.Button(
-            parent, text=text, command=command,
-            bg=bg, fg=fg, font=font,
-            padx=padx, pady=pady, relief="flat", cursor="hand2",
-            activebackground=hover_bg, activeforeground=fg, bd=0,
-        )
-    return b
+    return FlatButton(parent, text=text, command=command, bg=bg, fg=fg,
+                      hover=hover, font=font, padx=padx, pady=pady)
 
 
 def make_box(parent, bg=None, bd_color=None):
@@ -171,6 +221,7 @@ class CapstoneWorkstationUI:
         self.root.geometry("1200x800")
         self.root.configure(bg=C["bg"])
         self.root.resizable(True, True)
+        self._init_style()
 
         self._is_connected = False
         self._is_busy = False
@@ -206,6 +257,35 @@ class CapstoneWorkstationUI:
         self._build_topbar()
         self._build_main()
         self._tick_clock()
+
+    def _init_style(self):
+        """Force a light, flat look for ttk widgets on every platform.
+
+        Without this, macOS dark mode renders comboboxes/scrollbars dark
+        while the rest of the app is light."""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            return
+        style.configure(
+            "TCombobox",
+            fieldbackground="#ffffff", background="#ffffff",
+            foreground=C["text"], arrowcolor=C["text2"],
+            bordercolor=C["border"], lightcolor="#ffffff",
+            darkcolor="#ffffff", selectbackground="#dbe7ff",
+            selectforeground=C["text"], padding=4)
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", "#ffffff")],
+                  foreground=[("readonly", C["text"])])
+        style.configure("Vertical.TScrollbar",
+                        background=C["border"], troughcolor=C["sidebar"],
+                        bordercolor=C["sidebar"], arrowcolor=C["text2"])
+        # Dropdown list part of the combobox (plain tk listbox under the hood)
+        self.root.option_add("*TCombobox*Listbox.background", "#ffffff")
+        self.root.option_add("*TCombobox*Listbox.foreground", C["text"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", C["brand"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
 
     # ── Top bar ────────────────────────────────────────────────────────────────
     def _build_topbar(self):
@@ -786,14 +866,7 @@ class CapstoneWorkstationUI:
         # Switch button to Disconnect (red)
         self._connect_btn.config(
             text=self._lbl["connection"]["btn_disconnect"],
-            bg=C["red"], state=tk.NORMAL)
-        if USE_MAC_BTN:
-            self._connect_btn.bind(
-                "<Enter>", lambda e: self._connect_btn.config(bg=C["red_hover"]))
-            self._connect_btn.bind(
-                "<Leave>", lambda e: self._connect_btn.config(bg=C["red"]))
-        else:
-            self._connect_btn.config(activebackground=C["red_hover"])
+            bg=C["red"], hover=C["red_hover"], state=tk.NORMAL)
         self._show_connected_controls()
         self._start_cameras()
 
@@ -826,15 +899,8 @@ class CapstoneWorkstationUI:
         # Switch button back to Connect (blue)
         self._connect_btn.config(
             text=self._lbl["connection"]["btn_connect"],
-            bg=C["brand"],
+            bg=C["brand"], hover=C["brand_hover"],
             state=tk.NORMAL)
-        if USE_MAC_BTN:
-            self._connect_btn.bind(
-                "<Enter>", lambda e: self._connect_btn.config(bg=C["brand_hover"]))
-            self._connect_btn.bind(
-                "<Leave>", lambda e: self._connect_btn.config(bg=C["brand"]))
-        else:
-            self._connect_btn.config(activebackground=C["brand_hover"])
         self.safe_log(self._lbl["connection"]["log_disconnected"], "warn")
         notify_mac("Robot Disconnected", "Connection closed — controls hidden",
                    sound=None)

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Interactive arm-position recorder — run ONCE on the robot to create
 ~/arm_positions.json for arm_control.py.

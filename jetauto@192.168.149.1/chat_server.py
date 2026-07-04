@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Robot-side socket server. Receives a command from the Mac, runs the full
 delivery sequence — streaming progress lines and delegating vision checks to
