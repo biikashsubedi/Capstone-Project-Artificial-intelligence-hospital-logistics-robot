@@ -88,15 +88,23 @@ class RobotLink:
                 if on_log:
                     on_log(line[4:])
             elif line.startswith("DETECT "):
-                med = line[7:].strip()
-                found, conf = (False, 0.0)
+                # "DETECT <med> [arm|main]" — main is the depth-aligned camera
+                bits = line[7:].strip().split()
+                med = bits[0] if bits else ""
+                camera = bits[1] if len(bits) > 1 else "arm"
+                vals = [0.0] * 8          # conf, area, x, y, x1, y1, x2, y2
+                found = False
                 if on_detect:
                     try:
-                        found, conf = on_detect(med)
+                        r = on_detect(med, camera)
+                        found = bool(r[0])
+                        for i in range(min(8, len(r) - 1)):
+                            vals[i] = float(r[i + 1])
                     except Exception:
-                        found, conf = (False, 0.0)
-                self._send_line("DETECT_RESULT %s %.4f"
-                                % ("FOUND" if found else "NOT_FOUND", conf))
+                        found, vals = False, [0.0] * 8
+                self._send_line("DETECT_RESULT %s %s"
+                                % ("FOUND" if found else "NOT_FOUND",
+                                   " ".join("%.4f" % v for v in vals)))
             else:
                 # Final reply (OK:/ERROR:, or anything a legacy server sent).
                 return line

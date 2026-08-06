@@ -1,15 +1,15 @@
 {
   "medicines": [
     {
-      "label": "Acetaminophen — Med 1",
+      "label": "Acetaminophen",
       "value": "med1"
     },
     {
-      "label": "Allergy Relief — Med 2",
+      "label": "Allergy Relief",
       "value": "med2"
     },
     {
-      "label": "Ibuprofen — Med 3",
+      "label": "Ibuprofen",
       "value": "med3"
     }
   ],
@@ -21,22 +21,40 @@
     {
       "label": "Bed 2",
       "value": "bed2"
-    },
-    {
-      "label": "Bed 3",
-      "value": "bed3"
     }
   ],
   "voice_keywords": {
     "medicines": {
-      "med1": ["acetaminophen", "tylenol", "med one", "med 1"],
-      "med2": ["allergy", "allergy relief", "med two", "med 2"],
-      "med3": ["ibuprofen", "advil", "med three", "med 3"]
+      "med1": [
+        "acetaminophen",
+        "tylenol",
+        "med one",
+        "med 1"
+      ],
+      "med2": [
+        "allergy",
+        "allergy relief",
+        "med two",
+        "med 2"
+      ],
+      "med3": [
+        "ibuprofen",
+        "advil",
+        "med three",
+        "med 3"
+      ]
     },
     "bays": {
-      "bed1": ["bed one", "bed 1"],
-      "bed2": ["bed two", "bed 2"],
-      "bed3": ["bed three", "bed 3"]
+      "bed1": [
+        "bed one",
+        "bed 1",
+        "left"
+      ],
+      "bed2": [
+        "bed two",
+        "bed 2",
+        "right"
+      ]
     }
   }
 }

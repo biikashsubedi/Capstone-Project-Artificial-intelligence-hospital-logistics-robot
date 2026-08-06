@@ -5,8 +5,13 @@ Autonomous navigation. go_to(location_name) drives the robot to a saved
 location from locations.json using move_base (the same system you use by
 clicking "2D Nav Goal" in RViz), driven from code via actionlib.
 
-Locations are recorded once (RUNBOOK step B) into ~/locations.json with keys:
-    medicine_shelf, bed1, bed2, bed3
+Only used when config.NAV_MODE == "map". Locations are recorded once into
+~/locations.json with keys matching the mission:
+    home, medicine, bed1, bed2
+
+Because the mat is small, goals sit close together — if move_base refuses or
+oscillates, lower inflation_radius in the navigation params, or switch back to
+NAV_MODE = "odom" (waypoint.py), which needs no map at all.
 
 The move_base action name is AUTO-DETECTED: some JetAuto setups run it at
 /move_base, namespaced ones at /jetauto_1/move_base.

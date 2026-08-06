@@ -1,6 +1,8 @@
 {
-  "medicine_shelf": {"x": 0.00, "y": 0.00, "angle": 0.00},
-  "bed1": {"x": 0.00, "y": 0.00, "angle": 0.00},
-  "bed2": {"x": 0.00, "y": 0.00, "angle": 0.00},
-  "bed3": {"x": 0.00, "y": 0.00, "angle": 0.00}
+  "_comment": "Map-mode locations (NAV_MODE='map'). Record with: rostopic echo /amcl_pose -n 1 after driving the robot to each spot in RViz. angle = 2*atan2(orientation.z, orientation.w).",
+
+  "home":     {"x": 0.00, "y": 0.00, "angle": 0.00},
+  "medicine": {"x": 0.00, "y": 0.00, "angle": 0.00},
+  "bed1":     {"x": 0.00, "y": 0.00, "angle": 0.00},
+  "bed2":     {"x": 0.00, "y": 0.00, "angle": 0.00}
 }

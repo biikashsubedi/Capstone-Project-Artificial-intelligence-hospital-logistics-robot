@@ -86,10 +86,40 @@ class MedicineDetector:
         med_token is a command token (med1/med2/med3); it's translated to the
         model's class name via the config class_map.
         """
+        hit = self.find_medicine(med_token, pil_image)
+        return hit[0] if hit else None
+
+    def find_medicine(self, med_token, pil_image):
+        """Like check_medicine but also reports where and how big it looks.
+
+        Returns (confidence, area_fraction, offset_x, offset_y) or None:
+          area_fraction  the box's share of the whole frame (bigger = closer)
+          offset_x       -1.0 (far left) .. +1.0 (far right);  0 = mid-frame
+          offset_y       -1.0 (top)      .. +1.0 (bottom);     0 = mid-frame
+        The robot compares these against its CALIBRATED grip point (which is
+        usually not the middle of the image) to line the gripper up.
+        """
         target = self.cfg["class_map"].get(med_token, med_token).lower()
-        for cls_name, confidence, _box in self.detect(pil_image):
+        width = float(pil_image.width) or 1.0
+        height = float(pil_image.height) or 1.0
+        frame_area = width * height
+
+        def norm_x(px):
+            return (px - width / 2.0) / (width / 2.0)
+
+        def norm_y(py):
+            return (py - height / 2.0) / (height / 2.0)
+
+        for cls_name, confidence, (x1, y1, x2, y2) in self.detect(pil_image):
             if cls_name.lower() == target:
-                return confidence
+                box_area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+                cx = (x1 + x2) / 2.0
+                cy = (y1 + y2) / 2.0
+                return (confidence, box_area / frame_area,
+                        norm_x(cx), norm_y(cy),
+                        # the box edges too, so the robot can check whether the
+                        # gripper's grab point falls INSIDE the medicine
+                        norm_x(x1), norm_y(y1), norm_x(x2), norm_y(y2))
         return None
 
     def label_for(self, cls_name):

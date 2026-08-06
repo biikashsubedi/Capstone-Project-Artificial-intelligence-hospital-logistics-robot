@@ -241,8 +241,17 @@ class CapstoneWorkstationUI:
         self.detector = MedicineDetector() if HAS_DETECTOR else None
         self._detect_on = False
         self._detect_results = []     # latest [(name, conf, box), ...]
+        self._detect_results_main = []  # same, for the main/depth camera
         self._detect_generation = 0   # bumps every toggle; stops stale loops
         self._notify_last = {}        # per-event notification cooldown clocks
+        # Where the gripper actually closes, in frame coords (-1..+1). Default
+        # is Hiwonder's own value from automatic_pick.py (pixel 287,388).
+        # Where the robot believes its gripper closes. Fetched from the robot
+        # on connect so the cross you SEE is the one the robot actually aims
+        # at — a mismatch here silently makes "lined up" mean nothing.
+        self._grip_target_x = -0.103
+        self._grip_target_y = 0.617
+        self._grip_target_known = False
 
         self.voice = None
         self._voice_active = False
@@ -597,7 +606,10 @@ class CapstoneWorkstationUI:
         vport = int(rc.get("video_port", 8080))
         self._cam_streams = []
         for cfg, lbl, holder in zip(self._cam_cfgs, self._cam_labels, self._cam_holders):
-            url = "http://{}:{}/stream?topic={}".format(host, vport, cfg["topic"])
+            # Accept either one "topic" or a list of "topics" to probe.
+            topics = cfg.get("topics") or [cfg.get("topic")]
+            url = ["http://{}:{}/stream?topic={}".format(host, vport, t)
+                   for t in topics if t]
             stream = CameraStream(
                 url, lbl, container=holder, default_size=(self.CAM_W, self.CAM_H),
                 on_status=lambda text, l=lbl: l.config(image="", text="● " + text))
@@ -621,6 +633,45 @@ class CapstoneWorkstationUI:
         idx = min(max(idx, 0), len(self._cam_streams) - 1)
         return self._cam_streams[idx]
 
+    # Robot log lines that are worth a banner, in the order they occur.
+    # (substring to match, notification title, message)
+    STAGE_NOTES = [
+        ("going to medicine", "Searching 🔍", "Looking for the medicine table"),
+        ("arrived at marker 0", "Found it 📍", "At the medicine table"),
+        ("locking on", "Lining Up 🎯", "Centring the gripper on the medicine"),
+        ("LOCKED ON", "On Target 🎯", "Gripper is over the medicine"),
+        ("picking up the box", "Picking 🤖", "Closing the gripper"),
+        ("retracing", "Returning 🏠", "Heading back to the centre"),
+        ("going to bed1", "Delivering 🛏", "Searching for Bed 1"),
+        ("going to bed2", "Delivering 🛏", "Searching for Bed 2"),
+        ("going to home", "Returning 🏠", "Searching for the home marker"),
+        ("placing the box", "Placing 📦", "Setting the medicine down"),
+    ]
+
+    def _notify_stage(self, msg):
+        """Turn a robot progress line into a banner, without spamming."""
+        low = msg.lower()
+        for needle, title, text in self.STAGE_NOTES:
+            if needle.lower() in low:
+                now = datetime.now().timestamp()
+                # Same stage shouldn't fire twice within a few seconds.
+                if now - self._notify_last.get(needle, 0) < 4:
+                    return
+                self._notify_last[needle] = now
+                notify_mac(title, text, sound=None)
+                return
+
+    def _ensure_detection_on(self):
+        """Switch live detection on if it isn't already (called on deploy, so
+        the feed shows boxes during the mission without having to remember)."""
+        if self.detector is None or self._detect_on:
+            return self._detect_on
+        if not self._is_connected or not self._cam_streams:
+            return False
+        self.safe_log("Turning on live detection for this mission...", "info")
+        self._toggle_detection()
+        return self._detect_on
+
     def _toggle_detection(self):
         if self.detector is None:
             self.safe_log("⚠ Detector unavailable — install ultralytics "
@@ -639,6 +690,10 @@ class CapstoneWorkstationUI:
             stream = self._detect_stream()
             if stream is not None:
                 stream.frame_filter = self._draw_detections
+            # Main camera gets a centre crosshair too — that is the depth
+            # camera, so it shows what the distance measurement is aimed at.
+            if self._cam_streams and self._cam_streams[0] is not stream:
+                self._cam_streams[0].frame_filter = self._draw_main_overlay
             threading.Thread(target=self._detection_loop,
                              args=(self._detect_generation,), daemon=True).start()
         else:
@@ -650,6 +705,8 @@ class CapstoneWorkstationUI:
             stream = self._detect_stream()
             if stream is not None:
                 stream.frame_filter = None
+            if self._cam_streams:
+                self._cam_streams[0].frame_filter = None
             self.safe_log("Live detection stopped.", "info")
 
     def _detection_loop(self, generation):
@@ -673,6 +730,10 @@ class CapstoneWorkstationUI:
                 self.safe_log("⚠ Detection error: {}".format(e), "warn")
                 break
             self._detect_results = dets
+            stream_err = getattr(stream, "filter_error", None)
+            if stream_err:
+                self.safe_log("⚠ Overlay error: {}".format(stream_err), "warn")
+                stream.filter_error = None
             summary = "  ".join("{} {:.0f}%".format(
                 self.detector.label_for(n), c * 100) for n, c, _ in dets[:3])
             self.root.after(0, lambda s=summary: self._detect_lbl.config(
@@ -692,41 +753,102 @@ class CapstoneWorkstationUI:
             _time.sleep(0.25)
 
     def _draw_detections(self, img):
-        """Frame filter: draw the latest detection boxes onto a camera frame."""
-        dets = self._detect_results
-        if not dets:
-            return img
+        """Frame filter: draw detection boxes + the gripper's target point."""
         from PIL import ImageDraw
         draw = ImageDraw.Draw(img)
-        for name, conf, (x1, y1, x2, y2) in dets:
-            draw.rectangle([x1, y1, x2, y2], outline="#3fb950", width=4)
-            tag = " {} {:.0f}% ".format(self.detector.label_for(name), conf * 100)
-            ty = y1 - 16 if y1 > 18 else y1 + 4
-            draw.rectangle([x1, ty, x1 + 8 * len(tag), ty + 15], fill="#3fb950")
-            draw.text((x1 + 3, ty + 2), tag.strip(), fill="black")
+        w, h = img.size
+
+        # Crosshair = WHERE THE GRIPPER GRABS. The robot drives until this
+        # cross lands inside a detected medicine, and only then closes the
+        # jaws — so the cross turns GREEN the moment it is on the object.
+        gx = int((self._grip_target_x + 1.0) * w / 2.0)
+        gy = int((self._grip_target_y + 1.0) * h / 2.0)
+        locked = any(x1 <= gx <= x2 and y1 <= gy <= y2
+                     for _n, _c, (x1, y1, x2, y2) in self._detect_results)
+        cross = "#3fb950" if locked else "#ff3b30"
+        draw.line([gx - 22, gy, gx + 22, gy], fill=cross, width=3)
+        draw.line([gx, gy - 22, gx, gy + 22], fill=cross, width=3)
+        draw.ellipse([gx - 9, gy - 9, gx + 9, gy + 9], outline=cross, width=3)
+        if locked:
+            draw.ellipse([gx - 15, gy - 15, gx + 15, gy + 15],
+                         outline=cross, width=2)
+            draw.text((gx + 26, gy - 7), "ON TARGET", fill=cross)
+        if not self._grip_target_known:
+            # Be honest: this position hasn't been confirmed with the robot,
+            # so it may not be where the jaws really close.
+            draw.text((gx + 26, gy + 9), "unconfirmed", fill="#d29922")
+
+        for name, conf, (x1, y1, x2, y2) in self._detect_results:
+            draw.rectangle([x1, y1, x2, y2], outline="#3fb950", width=5)
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill="#3fb950")
+            draw.line([cx, cy, gx, gy], fill="#ffcc00", width=2)  # how far off
+            tag = "{} {:.0f}%".format(self.detector.label_for(name), conf * 100)
+            ty = y1 - 18 if y1 > 20 else y1 + 4
+            draw.rectangle([x1, ty, x1 + 9 * len(tag) + 8, ty + 17],
+                           fill="#3fb950")
+            draw.text((x1 + 4, ty + 3), tag, fill="black")
         return img
 
-    def _answer_detect(self, med):
-        """Robot asked 'is <med> on the shelf?' — run the model on the newest
-        arm-camera frame. Returns (found, confidence). Called off the UI thread."""
+    def _draw_main_overlay(self, img):
+        """Crosshair in the middle of the MAIN (depth) camera + any detections.
+
+        The depth reading is taken at the detected box's pixel, so seeing the
+        box here means the distance measurement has something to lock onto.
+        """
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        w, h = img.size
+        cx, cy = w // 2, h // 2
+        draw.line([cx - 18, cy, cx + 18, cy], fill="#58a6ff", width=2)
+        draw.line([cx, cy - 18, cx, cy + 18], fill="#58a6ff", width=2)
+        for name, conf, (x1, y1, x2, y2) in self._detect_results_main:
+            draw.rectangle([x1, y1, x2, y2], outline="#58a6ff", width=4)
+            tag = "{} {:.0f}%".format(self.detector.label_for(name), conf * 100)
+            ty = y1 - 18 if y1 > 20 else y1 + 4
+            draw.rectangle([x1, ty, x1 + 9 * len(tag) + 8, ty + 17],
+                           fill="#58a6ff")
+            draw.text((x1 + 4, ty + 3), tag, fill="black")
+        return img
+
+    def _answer_detect(self, med, camera="arm"):
+        """Robot asked 'do you see <med>, and where?'.
+
+        camera='arm'  -> the gripper camera (close-up confirmation)
+        camera='main' -> the Astra RGB, which is pixel-aligned with the depth
+                         image, so the robot can turn the answer into a real
+                         distance in metres.
+        Returns (found, confidence, area, offset_x, offset_y). Off the UI thread.
+        """
         if self.detector is None:
-            return (False, 0.0)
-        stream = self._detect_stream()
+            return (False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        stream = (self._cam_streams[0] if camera == "main" and self._cam_streams
+                  else self._detect_stream())
         frame = stream.get_latest_image() if stream else None
         if frame is None:
             self.safe_log("⚠ Vision check requested but no camera frame available",
                           "warn")
-            return (False, 0.0)
-        conf = self.detector.check_medicine(med, frame)
-        if conf is not None:
-            self.safe_log("✓ Vision confirmed {} ({:.0f}%)".format(med, conf * 100),
+            return (False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        if camera == "main":
+            try:
+                self._detect_results_main = self.detector.detect(frame)
+            except Exception:
+                self._detect_results_main = []
+        hit = self.detector.find_medicine(med, frame)
+        if hit is not None:
+            conf, area, off_x, off_y, bx1, by1, bx2, by2 = hit
+            self.safe_log("✓ Vision: {} seen ({:.0f}%, box {:.1f}%, at x{:+.2f} y{:+.2f})"
+                          .format(med, conf * 100, area * 100, off_x, off_y),
                           "success")
-            notify_mac("Vision Confirmed 👁",
-                       "{} identified on shelf ({:.0f}%)".format(med, conf * 100),
-                       sound="Pop")
-            return (True, conf)
+            now = datetime.now().timestamp()
+            if now - self._notify_last.get("confirm_" + med, 0) > 20:
+                self._notify_last["confirm_" + med] = now
+                notify_mac("Vision Confirmed 👁",
+                           "{} identified ({:.0f}%)".format(med, conf * 100),
+                           sound="Pop")
+            return (True, conf, area, off_x, off_y, bx1, by1, bx2, by2)
         self.safe_log("Vision: {} not visible in current frame".format(med), "warn")
-        return (False, 0.0)
+        return (False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def on_close(self):
         """Tidy up background threads and the socket before the window closes."""
@@ -869,6 +991,70 @@ class CapstoneWorkstationUI:
             bg=C["red"], hover=C["red_hover"], state=tk.NORMAL)
         self._show_connected_controls()
         self._start_cameras()
+        self._fetch_grip_point()
+        self._warm_up_detector()
+
+    def _warm_up_detector(self):
+        """Load the vision model as soon as we connect.
+
+        It loads lazily on first use, which used to cost several seconds at
+        the worst moment — the robot sitting at the medicine table waiting for
+        its first answer. Doing it here means detection is instant when a
+        mission starts, and live boxes appear as soon as the cameras do.
+        """
+        if self.detector is None:
+            return
+
+        def work():
+            ok = self.detector.ensure_loaded()
+            if ok:
+                # One throwaway inference so the first real one is fast too.
+                try:
+                    from PIL import Image
+                    self.detector.detect(Image.new("RGB", (640, 480)))
+                except Exception:
+                    pass
+            return ok
+
+        def on_done(ok, err):
+            if err is not None or not ok:
+                self.safe_log("⚠ Vision model could not be loaded: {}".format(
+                    err or self.detector.load_error), "warn")
+                return
+            self.safe_log("Vision model ready — detection will start instantly.",
+                          "success")
+            # Cameras need a moment to deliver their first frames.
+            self.root.after(1500, self._ensure_detection_on)
+
+        self._run_async(work, on_done)
+
+    def _fetch_grip_point(self):
+        """Ask the robot where its gripper actually closes, and draw the cross
+        there. Without this the on-screen cross is a guess that can disagree
+        with what the robot is aiming at."""
+        def work():
+            return self.robot.send_command("grip show")
+
+        def on_done(response, err):
+            if err is not None:
+                self.safe_log("⚠ Could not read the robot's grip point: {}"
+                              .format(err), "warn")
+                return
+            m = re.search(r"x\s*([+-]?\d*\.?\d+)\s*y\s*([+-]?\d*\.?\d+)",
+                          response or "")
+            if not m:
+                self.safe_log("⚠ Robot did not report a grip point — the red "
+                              "cross may not match where it aims.", "warn")
+                return
+            self._grip_target_x = float(m.group(1))
+            self._grip_target_y = float(m.group(2))
+            self._grip_target_known = True
+            self.safe_log("Grip point from robot: x {:+.3f} y {:+.3f} — the red "
+                          "cross now shows exactly where it aims."
+                          .format(self._grip_target_x, self._grip_target_y),
+                          "info")
+
+        self._run_async(work, on_done)
 
     def _run_async(self, work, on_done):
         """Run blocking work() in a thread; deliver (result, err) to on_done on the UI thread."""
@@ -924,6 +1110,7 @@ class CapstoneWorkstationUI:
         med_label = self._color_var.get()
         bed_label = self._dest_var.get()
 
+        self._ensure_detection_on()   # boxes on the live feed during the run
         self._set_busy(True)
         self._mission_lbl.config(
             text=self._lbl["deploy"]["mission_active"], fg="#10ac84")
@@ -935,6 +1122,7 @@ class CapstoneWorkstationUI:
 
         def on_log(msg):
             self.safe_log("🤖 " + msg, "info")
+            self._notify_stage(msg)
             if msg.startswith("Step "):   # mirror current step under the button
                 self.root.after(0, lambda m=msg: self._mission_lbl.config(
                     text=m[:46], fg="#10ac84"))
@@ -947,6 +1135,11 @@ class CapstoneWorkstationUI:
             self._handle_delivery_result(command, med_label, bed_label, response, err)
 
         self._run_async(work, on_done)
+
+
+
+
+
 
     def _handle_delivery_result(self, command, med_label, bed_label, response, err):
         self._set_busy(False)

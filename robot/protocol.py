@@ -45,20 +45,32 @@ class LineSocket:
         except Exception:
             pass  # Mac gone — delivery code will notice on the final send
 
-    def request_detection(self, med):
-        """Ask the Mac to run its vision model. Returns (found, confidence)."""
-        self.send_line("DETECT %s" % med)
+    def request_detection(self, med, camera="arm"):
+        """Ask the Mac to run its vision model.
+
+        Returns (found, conf, area, off_x, off_y, x1, y1, x2, y2):
+          area           how much of the frame the box fills (bigger = closer)
+          off_x/off_y    the box's centre, -1.0 .. +1.0, 0 = middle of frame
+          x1,y1,x2,y2    the box's EDGES in the same units, so the robot can
+                         check whether the gripper's grab point falls inside
+                         the medicine before closing the jaws.
+        """
+        self.send_line("DETECT %s %s" % (med, camera))
         reply = self.recv_line()
         if reply is None:
             raise ConnectionError("Mac disconnected during detection request")
         parts = reply.split()
-        # Expected: DETECT_RESULT FOUND|NOT_FOUND <confidence>
+        # DETECT_RESULT FOUND|NOT_FOUND <conf> [<area>] [<off_x>] [<off_y>]
         if len(parts) >= 2 and parts[0] == "DETECT_RESULT":
             found = parts[1] == "FOUND"
-            try:
-                conf = float(parts[2]) if len(parts) > 2 else 0.0
-            except ValueError:
-                conf = 0.0
-            return found, conf
+
+            def _num(idx):
+                try:
+                    return float(parts[idx]) if len(parts) > idx else 0.0
+                except ValueError:
+                    return 0.0
+
+            return (found, _num(2), _num(3), _num(4), _num(5),
+                    _num(6), _num(7), _num(8), _num(9))
         print("[robot] WARNING: unexpected detect reply: %r" % reply)
-        return False, 0.0
+        return (False,) + (0.0,) * 8

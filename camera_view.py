@@ -37,7 +37,11 @@ def mjpeg_frames(stream, should_continue, chunk_size=4096):
 
 class CameraStream:
     def __init__(self, url, label, container=None, default_size=(480, 360), on_status=None):
-        self.url = url
+        # `url` may be a single URL or a list of candidates to try in order —
+        # different JetAuto launch files expose the cameras under different
+        # topic names, so we probe until one actually delivers frames.
+        self.urls = [url] if isinstance(url, str) else list(url)
+        self.url = self.urls[0]
         self.label = label
         self.container = container or label   # fit frames to THIS widget's size
         self.default_size = default_size      # used until the tile is laid out
@@ -46,6 +50,7 @@ class CameraStream:
         self._frame_lock = threading.Lock()
         self._latest_image = None    # full-resolution PIL image of newest frame
         self.frame_filter = None     # optional callable(PIL) -> PIL (draw overlays)
+        self.filter_error = None     # last overlay failure, if any
 
     def start(self):
         if not PIL_AVAILABLE:
@@ -62,9 +67,17 @@ class CameraStream:
     # ── internals ──────────────────────────────────────────────────────────
     def _run(self):
         self._status("connecting...")
-        try:
-            stream = urllib.request.urlopen(self.url, timeout=10)
-        except Exception:
+        stream = None
+        for candidate in self.urls:          # try each topic until one works
+            if not self._running:
+                return
+            try:
+                stream = urllib.request.urlopen(candidate, timeout=6)
+                self.url = candidate
+                break
+            except Exception:
+                stream = None
+        if stream is None:
             self._status("no signal")
             return
         got_frame = False
@@ -101,9 +114,11 @@ class CameraStream:
             return
         if self.frame_filter is not None:
             try:
-                img = self.frame_filter(img)   # e.g. draw detection boxes
-            except Exception:
-                pass
+                # copy() matters: the un-drawn frame is what the model reads,
+                # so boxes must never be baked into the stored image.
+                img = self.frame_filter(img.copy())
+            except Exception as e:
+                self.filter_error = str(e)     # surfaced instead of swallowed
         # Fit to the CONTAINER's size (a fixed, non-propagating frame), not the
         # label — measuring the label would feed its own image size back in and
         # make the picture grow without bound.

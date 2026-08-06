@@ -1,31 +1,46 @@
 # Robot-Side Delivery System
 
-These scripts run **on the JetAuto Pro** (copy this folder to `~/delivery/`).
-Full instructions live in the project root: **[RUNBOOK.md](../RUNBOOK.md)**.
+Runs on the JetAuto Pro. Copy this folder to `~/delivery/` on the robot.
 
-| File | What it does |
+| File | Purpose |
 |---|---|
-| `config.py` | ALL settings — edit this first |
-| `chat_server.py` | Socket server the Mac GUI talks to (port 5050) |
-| `protocol.py` | Newline framing + LOG/DETECT message helpers |
-| `delivery.py` | 5-step sequence: shelf → verify → pick → bed → drop |
-| `navigator.py` | move_base goals from ~/locations.json (auto-detects namespace) |
-| `arm_control.py` | Hiwonder bus-servo pick/drop from ~/arm_positions.json |
-| `arm_recorder.py` | Interactive tool — records the 13 arm poses (run once) |
-| `arm_probe.py` | Diagnostic — prints servo topics/joints if arm misbehaves |
+| `config.py` | All settings — layout, speeds, marker IDs, arm values |
+| `chat_server.py` | Socket server the workstation connects to (port 5050) |
+| `protocol.py` | Message framing and vision requests |
+| `delivery.py` | The delivery sequence |
+| `marker_nav.py` | Locates places by their ArUco markers |
+| `motion.py` | Base movement (mecanum drive) |
+| `waypoint.py` | Odometry-based movement (used when `NAV_MODE = "odom"`) |
+| `navigator.py` | move_base navigation (used when `NAV_MODE = "map"`) |
+| `arm_control.py` | Arm and gripper via the JetAuto action groups |
+| `auto_pick.py` | Uses the robot's own `/automatic_pick` service when available |
+| `grip_target.py` | Where the gripper closes, and grip verification |
+| `depth_sense.py` | Distance measurement from the depth camera |
 | `parser.py` | Validates `move medX to bedY` |
-| `link_test_server.py` | No-ROS test server: real socket + real Mac vision, fake motion |
-| `detector.py` | OPTIONAL on-robot Roboflow fallback (not used in main flow) |
-| `*.template.json` | Copy to `~/locations.json` / `~/arm_positions.json`, fill in |
+| `start_robot.sh` | Brings the robot up and checks everything |
 
-Vision note: medicine detection runs **on the Mac** (best.pt over the live
-arm-camera stream). The robot asks the Mac over the socket (`DETECT med1`)
-and gets FOUND/NOT_FOUND back — nothing to install on the Jetson.
-
-Quick start (after calibration steps A–C in the RUNBOOK):
+## Start
 ```bash
-source ~/jetauto_ws/devel/setup.bash
-roslaunch jetauto_navigation navigation.launch map:=$HOME/room_map.yaml
-rosrun web_video_server web_video_server
+bash ~/delivery/start_robot.sh
+source ~/delivery/robot_env.sh
 cd ~/delivery && python3 chat_server.py
 ```
+Then connect from the workstation and press **INITIATE DEPLOYMENT**.
+
+## Maintenance commands
+Sent from the workstation (or any socket client):
+
+| Command | Effect |
+|---|---|
+| `move medX to bedY` | Run a delivery |
+| `grip show` | Report the gripper's target point |
+| `grip up\|down\|left\|right [amount]` | Nudge that point |
+| `grip reset` | Restore the default |
+| `setgrip medX` | Set the point to where the medicine currently is |
+| `align medX` | Drive up and line up, without picking |
+
+## Diagnostic tools
+Kept outside the deployed build in `dev/robot-tools/` on the workstation:
+`arm_test.py`, `arm_probe.py`, `marker_test.py`, `depth_test.py`,
+`waypoint_test.py`, `demo_setup.py`, `link_test_server.py`.
+Copy one across only if you need to diagnose something.

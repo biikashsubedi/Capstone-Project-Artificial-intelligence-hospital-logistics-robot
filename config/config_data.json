@@ -11,8 +11,16 @@
     "timeout": 180,
     "video_port": 8080,
     "cameras": [
-      {"name": "Main Camera", "topic": "/astra_cam/rgb/image_raw"},
-      {"name": "Arm Camera", "topic": "/usb_cam/image_raw"}
+      {"name": "Main Camera", "topics": [
+        "/astra_cam/rgb/image_raw",
+        "/jetauto_1/camera/rgb/image_raw",
+        "/camera/rgb/image_raw"
+      ]},
+      {"name": "Arm Camera", "topics": [
+        "/usb_cam/image_raw",
+        "/jetauto_1/usb_cam/image_raw",
+        "/usb_cam/image_rect_color"
+      ]}
     ],
     "detect_camera": 1
   },

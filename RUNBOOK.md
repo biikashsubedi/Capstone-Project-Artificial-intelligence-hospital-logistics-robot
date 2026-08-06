@@ -45,6 +45,80 @@ is Python 2 and will fail with encoding/syntax errors).
 
 ---
 
+# PART 0 — DEMO MODE (current setup — start here)
+
+`robot/chat_server.py` has `DEMO_MODE = True`: **every** command from the GUI
+(any medicine, any bed) runs the SAME fixed sequence — no map, no navigation,
+no vision matching:
+
+> pick the box in front → ride forward 2 s → stop → drop it on the RIGHT → arm home
+
+### One-time: teach the 5 arm positions (~5 min)
+```bash
+# robot: arm powered, medicine box on the table in front of the gripper
+source ~/jetauto_ws/devel/setup.bash
+cd ~/delivery && python3 demo_setup.py
+```
+You nudge ONE servo at a time and watch it move — nothing is guessed:
+```
+  jog> 3 +50      move servo 3 up by 50 pulses
+  jog> 4 -30      move servo 4 down by 30
+  jog> 3 =420     set servo 3 to exactly 420
+  jog> save       record this pose, go to the next
+  jog> back       redo the previous pose      quit = save & exit
+```
+Poses, in order: **home** (folded, safe to drive) → **approach** (gripper open,
+above the box) → **grip** (surrounding the box) → **lift** (box clear of table)
+→ **drop_right** (arm swung right, where the box should land). Then it tunes
+the gripper open/closed pulses. Saved to `~/demo_poses.json`.
+
+Verify the arm sequence WITHOUT driving:
+```bash
+python3 demo_setup.py test
+```
+
+### Run the demo
+```bash
+# robot:
+source ~/jetauto_ws/devel/setup.bash
+rosrun web_video_server web_video_server &     # camera feeds for the GUI
+cd ~/delivery && python3 chat_server.py
+# mac:
+conda activate yolo && python main.py
+#   CONNECT → pick anything → INITIATE DEPLOYMENT
+```
+
+Tuning in `robot/config.py`: `DEMO_DRIVE_SEC` (2.0), `DEMO_DRIVE_SPEED` (0.10),
+`DEMO_ARM_SEC` (2.0 s per arm move), `DEMO_STRAFE_SEC` (0 = off; set >0 to also
+strafe right before dropping).
+
+To restore full mapped delivery later: set `DEMO_MODE = False` in
+`robot/chat_server.py` and complete Part 1 below.
+
+---
+
+# Switching to SLAM + move_base navigation (optional)
+
+`robot/config.py` has **`NAV_MODE`**:
+
+| Mode | What it does | Setup |
+|---|---|---|
+| `"odom"` *(default)* | closed-loop odometry moves from `WAYPOINTS` | tune 3 numbers |
+| `"map"` | full SLAM + move_base via `~/locations.json` | Part 1 below |
+
+To use the map:
+1. Build the map (Part 1-A) — SLAM maps the **room**, not the mat; your
+   places become x/y coordinates inside it.
+2. Record `home`, `medicine`, `bed1`, `bed2` into `~/locations.json` (Part 1-B).
+3. Set `NAV_MODE = "map"` in `robot/config.py`.
+4. Start the navigation stack before `chat_server.py`.
+
+⚠️ Your goals are only ~35 cm apart. If move_base refuses the goal or spins,
+lower `inflation_radius` (and `xy_goal_tolerance`) in the JetAuto navigation
+params — or switch back to `"odom"`, which has no such limitation.
+
+---
+
 # PART 1 — Hardware calibration (do once, robot present)
 
 ## A. Build the map (guidebook Ch. 3)
@@ -126,6 +200,30 @@ python main.py
 3. Pick medicine + bed → **INITIATE DEPLOYMENT**.
 4. Watch step-by-step 🤖 logs stream in Telemetry; macOS notification +
    report.csv row on completion.
+
+## FETCH mission — pick a nearby medicine WITHOUT a map
+
+The GUI's **FETCH NEARBY · PICK TEST** button runs a no-map mission:
+creep forward in ~12 cm steps → between steps the Mac's model checks
+"see it? how close?" → stop automatically when the box fills ≥5% of the
+frame → confirm twice → pick with the arm (skipped with a warning until
+arm poses are recorded) → reverse exactly back to the start.
+
+Run it against the REAL robot (needs `chat_server.py`, not link_test):
+```bash
+# robot:  place a medicine 0.5–1.5 m in FRONT of the robot, floor clear
+cd ~/delivery && python3 chat_server.py
+# mac:    CONNECT → select the medicine → FETCH NEARBY · PICK TEST
+```
+Test the pieces individually first (safe order):
+```bash
+python3 ~/delivery/motion.py forward 1.0    # wheels: one small step
+python3 ~/delivery/motion.py backward 1.0   # wheels: reverse
+# then the full fetch WITHOUT arm poses (pick auto-skips, still returns)
+# then record arm poses (Part 1-C) and fetch again for the real pick
+```
+Tuning in `config.py`: FETCH_SPEED, FETCH_STEP_SEC, FETCH_MAX_STEPS,
+FETCH_NEAR_AREA (raise if it stops too far away, lower if it gets too close).
 
 ## Rehearsal without nav/arm (works TODAY)
 

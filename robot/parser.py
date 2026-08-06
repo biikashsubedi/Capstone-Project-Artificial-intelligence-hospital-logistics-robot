@@ -22,14 +22,17 @@ def parse_command(text):
     destination = parts[3]
 
     if medicine not in config.VALID_MEDICINES:
-        return None, "ERROR: Unknown medicine '%s'. Use med1, med2, or med3" % medicine
+        return None, ("ERROR: Unknown medicine '%s'. Use %s"
+                      % (medicine, ", ".join(config.VALID_MEDICINES)))
     if destination not in config.VALID_BEDS:
-        return None, "ERROR: Unknown destination '%s'. Use bed1, bed2, or bed3" % destination
+        return None, ("ERROR: Unknown destination '%s'. Use %s"
+                      % (destination, ", ".join(config.VALID_BEDS)))
 
     return {"medicine": medicine, "destination": destination}, None
 
 
 if __name__ == "__main__":
     # Quick self-test (runs anywhere, no ROS needed):
-    for t in ["move med1 to bed1", "move med5 to bed1", "go med1 bed1", "move med2 to bed3"]:
+    for t in ["move med1 to bed1", "move med3 to bed2", "move med5 to bed1",
+              "go med1 bed1", "move med2 to bed3"]:
         print(repr(t), "->", parse_command(t))
